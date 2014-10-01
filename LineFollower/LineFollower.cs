@@ -167,27 +167,6 @@ namespace LineFollower
 
         private void dc_write(Int16 type, Int16 value)
         {
-            //var size = sizeof(Int16);
-            //var length = size * 3;
-            //var byteBuffer = new Byte[length];
-            //var currentByte = 0;
-            //for (; currentByte < size; currentByte++)
-            //{
-            //    var i = currentByte % 2;
-            //    byteBuffer[currentByte] = (Byte)(DC_SEND_HEADER << (i * 8));
-            //}
-
-            //for (; currentByte < size * 2; currentByte++)
-            //{
-            //    var i = currentByte % 2;
-            //    byteBuffer[currentByte] = (Byte)(type << (i * 8));
-            //}
-
-            //for (; currentByte < size * 3; currentByte++)
-            //{
-            //    var i = currentByte % 2;
-            //    byteBuffer[currentByte] = (Byte)(value << (i * 8));
-            //}
             var byteBuffer = new[] { (Byte)DC_SEND_HEADER, (Byte)type, (Byte)value };
             var length = byteBuffer.Length;
             var result = serial.Write(byteBuffer, 0, length);
