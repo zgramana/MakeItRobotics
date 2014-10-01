@@ -2,6 +2,7 @@ using System;
 using Microsoft.SPOT;
 using System.Threading;
 using System.IO.Ports;
+using System.Text;
 
 namespace LineFollower
 {
@@ -12,105 +13,76 @@ namespace LineFollower
 
         private SerialPort serial;
 
-        private const int IR_0_LOWER_LIMIT = 250;
-        private const int IR_0_UPPER_LIMIT = 550;
-        private const int IR_1_LOWER_LIMIT = 900;
-        private const int IR_1_UPPER_LIMIT = 1400;
-
-        ulong current_IR_time;
-        ulong diff_IR_time;
-
-        byte incount = 0;
-        ulong last_IR_time = 0;
-
-        byte OirDataHigh, OirDataLow;
-        byte CirDataHigh, CirDataLow;
-
-        byte even = 0;
-
         long repeatTimer1 = DateTime.Now.Ticks;
-        long repeatTimer2 = DateTime.Now.Ticks;  
+        long repeatTimer2 = DateTime.Now.Ticks;
 
-        byte incomingByte = 0;
-        int incomingCnt = 0;
+        Int16 sensor_in;                  //variable to store the value of read_optical function feedback 
+        Int16 sensorValue1 = 0;           //variable to store optical1 status
+        Int16 sensorValue2 = 0;           //variable to store optical2 status
+        Int16 sensorCnt = 0;              //variable to count for trigger which optical
 
-        Boolean msgStart = false;
-        Boolean msgEnd   = false;
+        long sensorTimer1 = DateTime.Now.Ticks;   //last triggered time
+        long sensorTimer2 = DateTime.Now.Ticks;   //now time
 
-        int msgHeader = 0;
-        int msgId     = 0;
-        int msgValue  = 0;
+        Int16 action1 = 0;                //now action
+        Int16 action2 = 0;                //last action
+
+        Int16 msgHeader = 0;
+        Int16 msgId     = 0;
+        Int16 msgValue  = 0;
 
         #endregion
 
         #region Constants
 
-        private const int DC_CMD_IR_RX1 = 0x60;
-        private const int DC_CMD_IR_RX2 = 0x61;
-        private const int DC_CMD_IR_RX3 = 0x62;
-        private const int DC_CMD_IR_TX1 = 0x70;
-        private const int DC_CMD_IR_TX2 = 0x71;
-        private const int DC_CMD_IR_TX3 = 0x72;
-        private const int SW_ON = 0xff;
+        const Int16 DC_CMD_IR_RX1 = 0x60;
+        const Int16 DC_CMD_IR_RX2 = 0x61;
+        const Int16 DC_CMD_IR_RX3 = 0x62;
+        const Int16 DC_CMD_IR_TX1 = 0x70;
+        const Int16 DC_CMD_IR_TX2 = 0x71;
+        const Int16 DC_CMD_IR_TX3 = 0x72;
+        const Int16 SW_ON = 0xff;
 
-        private const int DC_SEND_HEADER = 0x56;
-        private const int DC_RECV_HEADER = 0x76;
-        private const int DC_CMD_DIRA = 0x73;
-        private const int DC_CMD_DIRB = 0x74;
-        private const int DC_CMD_DIRC = 0x75;
-        private const int DC_CMD_DIRD = 0x76;
-        private const int DC_CMD_PWMA = 0x80;
-        private const int DC_CMD_PWMB = 0x81;
-        private const int DC_CMD_PWMC = 0x82;
-        private const int DC_CMD_PWMD = 0x83;
-        private const int FW = 0xff;
-        private const int BW  = 0x00;
-        private const int PIN_LED1 = 8;     //LED control
-        private const int PIN_LED2 = 11;    //LED control
-        private const int PIN_LED3 = 12;    //LED control
-        private const int PIN_LED4 = 13;    //LED control
-
-        private const int SW1 = 0x2034;
-        private const int SW2 = 0x1034;
-        private const int SW3 = 0x0834;
-        private const int SW4 = 0x0434;
-        private const int SW5 = 0x0234;
-        private const int SW6 = 0x0134;
-        private const int SW7 = 0x2032;
-        private const int SW8 = 0x1032;
-        private const int SW51 = 0x2234;
-        private const int SW61 = 0x2134;
-        private const int SW53 = 0x0A34;
-        private const int SW63 = 0x0934;
-        private const int CONT = 0x34;
-        private const int ONES = 0x32;
+        const Int16 DC_SEND_HEADER = 0x56;
+        const Int16 DC_RECV_HEADER = 0x76;
+        const Int16 DC_CMD_DIRA = 0x73;
+        const Int16 DC_CMD_DIRB = 0x74;
+        const Int16 DC_CMD_DIRC = 0x75;
+        const Int16 DC_CMD_DIRD = 0x76;
+        const Int16 DC_CMD_PWMA = 0x80;
+        const Int16 DC_CMD_PWMB = 0x81;
+        const Int16 DC_CMD_PWMC = 0x82;
+        const Int16 DC_CMD_PWMD = 0x83;
+        const Int16 FW = 0xff;
+        const Int16 BW  = 0x00;
+        const Int16 PIN_LED1 = 8;     //LED control
+        const Int16 PIN_LED2 = 11;    //LED control
+        const Int16 PIN_LED3 = 12;    //LED control
+        const Int16 PIN_LED4 = 13;    //LED control
 
         #endregion
 
         public LineFollower()
         {
             serial = new SerialPort("COM1", 10420);
+            serial.ReadTimeout = 0;
+            serial.ErrorReceived += serial_ErrorReceived;
             serial.Open();
 
             Thread.Sleep(500);        //delay 500ms
 
             line_following_setup();   //initialize the status of line following robot
             all_stop();               //all motors stop
+            Thread.Sleep(1000);
+        }
+
+        void serial_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
+        {
+            Debug.Print("Serial Error: " + e.ToString());
         }
 
         internal void Run()
         {
-            int sensor_in;                  //variable to store the value of read_optical function feedback 
-            int sensorValue1 = 0;           //variable to store optical1 status
-            int sensorValue2 = 0;           //variable to store optical2 status
-            int sensorCnt = 0;              //variable to count for trigger which optical
-
-            long sensorTimer1 = DateTime.Now.Ticks;   //last triggered time
-            long sensorTimer2 = DateTime.Now.Ticks;   //now time
-
-            int action1 = 0;                //now action
-            int action2 = 0;                //last action
-
             //************************************************************************
             //  Trigger Left/Right optical every 15 milliseconds
             //************************************************************************ 
@@ -137,6 +109,7 @@ namespace LineFollower
             //  Read Left/Right optical status
             //***********************************************************************
             sensor_in = read_optical();
+            Debug.Print("Optical value: " + sensor_in);
             /************************************************************************
             read_optical()
             Description
@@ -146,25 +119,25 @@ namespace LineFollower
             Parameters
                 none
             Returns
-                0x000  optical1 black
-                0x0ff  optical1 white
-                0x100  optical1 white
-                0x1ff  optical1 black
+                0x000  optical1 black (0)
+                0x0ff  optical1 white (255)
+                0x100  optical2 white (256)
+                0x1ff  optical2 black (511)
                 0x2XX  not ready; don't use this value      
             *************************************************************************/
             if ((sensor_in & 0xf00) == 0)
-                sensorValue1 = sensor_in & 0xff;
+                sensorValue1 = (Int16)(sensor_in & 0xff);
             else if ((sensor_in & 0xf00) >> 8 == 1)
-                sensorValue2 = sensor_in & 0xff;
+                sensorValue2 = (Int16)(sensor_in & 0xff);
 
             if (sensorValue1 == 0x00)
-                action1 = action1 & 0xfe;
+                action1 = (Int16)(action1 & 0xfe);
             if (sensorValue1 == 0xFF)
-                action1 = action1 | 0x01;
+                action1 = (Int16)(action1 | 0x01);
             if (sensorValue2 == 0x00)
-                action1 = action1 | 0x02;
+                action1 = (Int16)(action1 | 0x02);
             if (sensorValue2 == 0xFF)
-                action1 = action1 & 0xfd;
+                action1 = (Int16)(action1 & 0xfd);
             /************************************************************************
             action1
                         left        right
@@ -192,9 +165,37 @@ namespace LineFollower
             action2 = action1;
         }
 
-        private void dc_write(int type, int value)
+        private void dc_write(Int16 type, Int16 value)
         {
-            serial.Write(new[] { (Byte)DC_SEND_HEADER, (Byte)type, (Byte)value }, 0, 3);
+            //var size = sizeof(Int16);
+            //var length = size * 3;
+            //var byteBuffer = new Byte[length];
+            //var currentByte = 0;
+            //for (; currentByte < size; currentByte++)
+            //{
+            //    var i = currentByte % 2;
+            //    byteBuffer[currentByte] = (Byte)(DC_SEND_HEADER << (i * 8));
+            //}
+
+            //for (; currentByte < size * 2; currentByte++)
+            //{
+            //    var i = currentByte % 2;
+            //    byteBuffer[currentByte] = (Byte)(type << (i * 8));
+            //}
+
+            //for (; currentByte < size * 3; currentByte++)
+            //{
+            //    var i = currentByte % 2;
+            //    byteBuffer[currentByte] = (Byte)(value << (i * 8));
+            //}
+            var byteBuffer = new[] { (Byte)DC_SEND_HEADER, (Byte)type, (Byte)value };
+            var length = byteBuffer.Length;
+            var result = serial.Write(byteBuffer, 0, length);
+            if (result != length)
+            {
+                throw new InvalidOperationException(String.Concat("Sent ", result, " bytes instead of 3."));
+            }
+            serial.Flush();
             Thread.Sleep(20);
         }
 
@@ -212,10 +213,11 @@ namespace LineFollower
             dc_write(DC_CMD_IR_TX2, SW_ON);
         }
 
-        private void line_following_turn_right(int speed)
+        private void line_following_turn_right(Int16 speed)
         {
-            int duty = 0;
-            int half = 0;
+            Debug.Print("Right turn: " + speed);
+            Int16 duty = 0;
+            Int16 half = 0;
             if (speed == 0)
             {
                 duty = 0;
@@ -228,8 +230,8 @@ namespace LineFollower
             }
             else
             {
-                duty = 257 - speed;
-                half = 257 - speed * 3 / 4;
+                duty = (Int16)(257 - speed);
+                half = (Int16)(257 - speed * 3 / 4);
             }
             dc_write(DC_CMD_DIRA, FW);
             dc_write(DC_CMD_DIRB, BW);
@@ -237,10 +239,11 @@ namespace LineFollower
             dc_write(DC_CMD_PWMB, half);
         }
 
-        private void line_following_turn_left(int speed)
+        private void line_following_turn_left(Int16 speed)
         {
-            int duty = 0;
-            int half = 0;
+            Debug.Print("Left turn: " + speed);
+            Int16 duty = 0;
+            Int16 half = 0;
             if (speed == 0)
             {
                 duty = 0;
@@ -253,8 +256,8 @@ namespace LineFollower
             }
             else
             {
-                duty = 257 - speed;
-                half = 257 - speed * 3 / 4;
+                duty = (Int16)(257 - speed);
+                half = (Int16)(257 - speed * 3 / 4);
             }
             dc_write(DC_CMD_DIRA, BW);
             dc_write(DC_CMD_DIRB, FW);
@@ -262,54 +265,42 @@ namespace LineFollower
             dc_write(DC_CMD_PWMB, duty);
         }
 
-        private void go_forward(int speed)
+        private void go_forward(Int16 speed)
         {
+            Debug.Print("Going forward: " + speed);
             if (speed >= 255)
                 speed = 1;
             else if (speed != 0)
-                speed = 256 - speed;
+                speed = (Int16)(256 - speed);
             dc_write(DC_CMD_DIRA, FW);
             dc_write(DC_CMD_DIRB, FW);
             dc_write(DC_CMD_PWMA, speed);
             dc_write(DC_CMD_PWMB, speed);
         }
 
-        private int read_optical()
+        private Int16 read_optical()
         {
-            while (serial.IsOpen)
+            if (serial.IsOpen)
             {
-                var buffer = new byte[1];
-                var result = serial.Read(buffer, 0, 1);
-                incomingByte = buffer[0];
-                if (msgStart && incomingCnt == 2)
+                var buffer = new byte[serial.BytesToRead];
+                var result = serial.Read(buffer, 0, serial.BytesToRead);
+
+                msgHeader = buffer[0];
+                msgId = buffer[1];
+                msgValue = buffer[2];
+
+                if (msgHeader == DC_RECV_HEADER)
                 {
-                    msgValue = incomingByte;
-                    incomingCnt = 3;
-                    msgEnd = true;
-                    break;
+                    if (msgId == DC_CMD_IR_RX1)
+                        msgValue &= 0xff;
+                    if (msgId == DC_CMD_IR_RX2)
+                        msgValue |= 0x100;
+                    return msgValue;
                 }
-                if (msgStart && incomingCnt == 1)
+                else
                 {
-                    msgId = incomingByte;
-                    incomingCnt = 2;
+                    return 0x200;
                 }
-                if (incomingByte == DC_RECV_HEADER && !msgStart)
-                {
-                    msgHeader = incomingByte;
-                    incomingCnt = 1;
-                    msgStart = true;
-                }
-            }
-            if (msgStart && msgEnd)
-            {
-                msgStart = false;
-                msgEnd = false;
-                incomingCnt = 0;
-                if (msgId == DC_CMD_IR_RX1)
-                    msgValue &= 0xff;
-                if (msgId == DC_CMD_IR_RX2)
-                    msgValue |= 0x100;
-                return msgValue;
             }
             else
             {
@@ -319,12 +310,12 @@ namespace LineFollower
 
         private void trigger_optical2()
         {
-            dc_write(DC_CMD_IR_RX2, 0x00);
+            dc_write(DC_CMD_IR_RX2, 0);
         }
 
         private void trigger_optical1()
         {
-            dc_write(DC_CMD_IR_RX1, 0x00);
+            dc_write(DC_CMD_IR_RX1, 0);
         }
     }
 }
