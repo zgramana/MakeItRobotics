@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <FeatureName>StreetSweeper</FeatureName>
+    <Guid>{09b1dc69-f305-4557-b421-8b2efaaf2b7e}</Guid>
+    <Description />
+    <Groups />
+  </PropertyGroup>
+  <ItemGroup>
+    <DriverLibs Include="StreetSweeper.$(LIB_EXT)" />
+    <InteropFeature Include="StreetSweeper" />
+    <MMP_DAT_CreateDatabase Include="$(BUILD_TREE_CLIENT)\pe\StreetSweeper.pe" />
+    <RequiredProjects Include="C:\sources\MakeItRobotics\StreetSweeper\Stubs\dotnetmf.proj" />
+  </ItemGroup>
+</Project>
