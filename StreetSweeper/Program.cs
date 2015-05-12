@@ -18,12 +18,12 @@ namespace MakeItRobotics
         const Int16 SW6 = 0x0134;
         const Int16 SW7 = 0x2032;
         const Int16 SW8 = 0x1032;
-        const Int16 SW51 = 0x2234;
-        const Int16 SW61 = 0x2134;
-        const Int16 SW53 = 0x0A34;
-        const Int16 SW63 = 0x0934;
-        const Int16 CONT = 0x0034;
-        const Int16 ONES = 0x0032;
+        //const Int16 SW51 = 0x2234;
+        //const Int16 SW61 = 0x2134;
+        //const Int16 SW53 = 0x0A34;
+        //const Int16 SW63 = 0x0934;
+        //const Int16 CONT = 0x0034;
+        //const Int16 ONES = 0x0032;
 
         #endregion
         private static StreetSweeper street_sweeper;
@@ -36,7 +36,7 @@ namespace MakeItRobotics
 
         public static void Main()
         {
-            remotePin = new InterruptPort((Cpu.Pin)FEZ_Pin.Interrupt.Di7, false, Port.ResistorMode.PullUp, Port.InterruptMode.InterruptEdgeHigh);
+            remotePin = new InterruptPort((Cpu.Pin)FEZ_Pin.Interrupt.Di7, false, Port.ResistorMode.PullUp, Port.InterruptMode.InterruptEdgeBoth);
 
             street_sweeper = new StreetSweeper();
             street_sweeper.remote_setup(remotePin);

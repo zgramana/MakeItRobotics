@@ -12,27 +12,34 @@ namespace MakeItRobotics
     {
         #region Constants
 
-        const Int16 DC_SEND_HEADER = 0x56;
-        const Int16 DC_RECV_HEADER = 0x76;
-        const Int16 FW = 0xff;
-        const Int16 BW = 0x00;
-        const Int16 DC_CMD_DIRA = 0x73;
-        const Int16 DC_CMD_DIRB = 0x74;
-        const Int16 DC_CMD_DIRC = 0x75;
-        const Int16 DC_CMD_DIRD = 0x76;
-        const Int16 DC_CMD_PWMA = 0x80;
-        const Int16 DC_CMD_PWMB = 0x81;
-        const Int16 DC_CMD_PWMC = 0x82;
-        const Int16 DC_CMD_PWMD = 0x83;
+        const Byte DC_SEND_HEADER = 0x56;
+        const Byte DC_RECV_HEADER = 0x76;
+        const Byte FW = 0xff;
+        const Byte BW = 0x00;
+        const Byte DC_CMD_DIRA = 0x73;
+        const Byte DC_CMD_DIRB = 0x74;
+        const Byte DC_CMD_DIRC = 0x75;
+        const Byte DC_CMD_DIRD = 0x76;
+        const Byte DC_CMD_PWMA = 0x80;
+        const Byte DC_CMD_PWMB = 0x81;
+        const Byte DC_CMD_PWMC = 0x82;
+        const Byte DC_CMD_PWMD = 0x83;
 
-        const Int16 IR_0_LOWER_LIMIT = 0;
-        const Int16 IR_0_UPPER_LIMIT = 14;
-        const Int16 IR_1_LOWER_LIMIT = 15;
-        const Int16 IR_1_UPPER_LIMIT = 40;
+        const Byte IR_0_LOWER_LIMIT = 2;
+        const Byte IR_0_UPPER_LIMIT = 6;
+        const Byte IR_1_LOWER_LIMIT = 10;
+        const Byte IR_1_UPPER_LIMIT = 15;
 
         #endregion
 
         #region Fields
+
+        private static long lastTime;
+        private static int count;
+        private static int commandValueHigh;
+        private static int commandValueLow;
+        private static long microsecondsSinceLastEdge;
+
 
         byte irDataHigh;
         byte irDataLow;
@@ -61,6 +68,7 @@ namespace MakeItRobotics
         #endregion
 
         private SerialPort serial;
+        private static int commandValue;
 
         public StreetSweeper()
         {
@@ -80,7 +88,7 @@ namespace MakeItRobotics
         {
             //remotePin = new InputPort((Cpu.Pin)FEZ_Pin.Digital.Di10, false, Port.ResistorMode.PullUp);
             //remotePin.EnableInterrupt();
-            remotePin.OnInterrupt += remotePin_OnInterrupt;
+            remotePin.OnInterrupt += interrupted;
 
             //pinMode(10, INPUT);
             //digitalWrite(10, HIGH);
@@ -89,10 +97,83 @@ namespace MakeItRobotics
             //MCUCR = (1 << ISC01) | (1 << ISC00);
         }
 
-        void remotePin_OnInterrupt(uint data1, uint data2, DateTime time)
+        //void remotePin_OnInterrupt(uint data1, uint data2, DateTime time)
+        //{
+        //    //Debug.Print("IR event: " + micros(time.Ticks));
+        //    remote_scan(time.Ticks);  //analyze signal from RadioShack Make: it Robotics Remote Control
+        //}
+        private void interrupted(uint data1, uint data2, DateTime time)
         {
-            //Debug.Print("IR event: " + micros(time.Ticks));
-            remote_scan(time.Ticks);  //analyze signal from RadioShack Make: it Robotics Remote Control
+            microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
+            if (microsecondsSinceLastEdge > 1500)
+            {
+                count = 0;
+            }
+            Debug.Print(count.ToString() + ": " + microsecondsSinceLastEdge + "(" + data1.ToString() + "/" + data2.ToString() + ")");
+            if (count == 0)
+            {
+                count = 1;
+                lastTime = time.Ticks; //DateTime.Now.Ticks;
+                commandValueLow = 0;
+                commandValueHigh = 0;
+                microsecondsSinceLastEdge = 0;
+            }
+            else if (count >= 24)
+            {
+                count++;
+                lastTime = time.Ticks;
+                return;
+            }
+            else if (count < 24 && count % 2 == 0)
+            {
+                count++;
+                lastTime = time.Ticks;
+            }
+            else if (count > 0 && count <= 11)
+            {
+                microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
+                commandValueLow <<= 1;
+                if (microsecondsSinceLastEdge <= 8)
+                {
+                    commandValueLow &= 0xFE;
+                }
+                else
+                {
+                    commandValueLow |= 1;
+                }
+                count++;
+            }
+            else if (count > 11 && count <= 23)
+            {
+                microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
+                commandValueHigh <<= 1;
+                if (microsecondsSinceLastEdge <= 8)
+                {
+                    commandValueHigh &= 0xFE;
+                }
+                else
+                {
+                    commandValueHigh |= 1;
+                }
+                count++;
+            }
+            else
+            {
+                count++;
+            }
+
+            if (count == 24)
+            {
+                commandValue = commandValueHigh * 256 + commandValueLow;
+                Debug.Print(count.ToString() + "Command Value: " + commandValue.ToString());
+                irRxFlag = true;
+                repeatTimer1 = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                return;
+            }
+            else
+            {
+                lastTime = time.Ticks;
+            }
         }
 
         internal void all_stop()
@@ -104,7 +185,7 @@ namespace MakeItRobotics
             dc_write(DC_CMD_PWMD, 0);
         }
 
-        private void dc_write(Int16 type, Int16 value)
+        private void dc_write(Byte type, Byte value)
         {
             var byteBuffer = new[] { (Byte)DC_SEND_HEADER, (Byte)type, (Byte)value };
             var length = byteBuffer.Length;
@@ -117,90 +198,89 @@ namespace MakeItRobotics
             Thread.Sleep(20);
         }
 
-        internal void m3_action(short dir, short speed)
+        internal void m3_action(Byte dir, Byte speed)
         {
           if (speed >= 255)
             speed = 1;
           else if(speed!=0)
-            speed = (short)(256 - speed);
+            speed = (Byte)(256 - speed);
           dc_write(DC_CMD_DIRC, dir > 0 ? FW : BW);
           dc_write(DC_CMD_PWMC, speed);
         }
 
-        internal void m4_action(short dir, short speed)
+        internal void m4_action(Byte dir, Byte speed)
         {
           if (speed >= 255)
             speed = 1;
           else if(speed!=0)
-            speed = (short)(256 - speed);
+            speed = (Byte)(256 - speed);
           dc_write(DC_CMD_DIRD, dir > 0 ? FW : BW);
           dc_write(DC_CMD_PWMD, speed);
         }
 
         internal int remote_value_read()
         {
+            //return commandValue;
             repeatTimer2 = DateTime.Now.Ticks / 10000;
             if ((repeatTimer2 - repeatTimer1) < 300)
             {
                 if (irRxFlag == true)
                 {
-                    Debug.Print("IR Receive Flag True");
                     irRxFlag = false;
-                    irBits = 0;
                 }
             }
             else
             {
-                CirDataHigh = 0;
+                commandValue = 0;
             }
-            return CirDataHigh;
+            return commandValue;
         }
 
-        internal void street_sweeper_inward(short speed)
+        internal void street_sweeper_inward(Byte speed)
         {
             Debug.Print("Sweeping inward: " + speed);
             m3_action(BW, speed);
           m4_action(BW,speed);  
         }
 
-        internal void street_sweeper_outward(short speed)
+        internal void street_sweeper_outward(Byte speed)
         {
             Debug.Print("Sweeping outward: " + speed);
             m3_action(FW, speed);
           m4_action(FW,speed); 
         }
 
-        internal void go_forward(Int16 speed)
+        internal void go_forward(Byte speed)
         {
             Debug.Print("Going forward: " + speed);
             if (speed >= 255)
                 speed = 1;
             else if (speed != 0)
-                speed = (Int16)(256 - speed);
+                speed = (Byte)(256 - speed);
             dc_write(DC_CMD_DIRA, FW);
             dc_write(DC_CMD_DIRB, FW);
             dc_write(DC_CMD_PWMA, speed);
             dc_write(DC_CMD_PWMB, speed);
         }
 
-        internal void go_backward(Int16 speed)
+        internal void go_backward(Byte speed)
         {
             Debug.Print("Going backward: " + speed);
             if (speed >= 255)
                 speed = 1;
             else if (speed != 0)
-                speed = (short)(256 - speed);
+                speed = (Byte)(256 - speed);
             dc_write(DC_CMD_DIRA, BW);
             dc_write(DC_CMD_DIRB, BW);
             dc_write(DC_CMD_PWMA, speed);
             dc_write(DC_CMD_PWMB, speed);
         }
 
-        internal void turn_front_left(Int16 speed)
+        internal void turn_front_left(Byte speed)
         {
             Debug.Print("Left turn: " + speed);
-            short duty = 0;
-            short half = 0;
+            Byte duty = 0;
+            Byte half = 0;
             if (speed == 0)
             {
                 duty = 0;
@@ -213,8 +293,8 @@ namespace MakeItRobotics
             }
             else
             {
-                duty = (short)(257 - speed);
-                half = (short)((short)(257 - speed) / 2);
+                duty = (Byte)(257 - speed);
+                half = (Byte)((Byte)(257 - speed) / 2);
             }
             dc_write(DC_CMD_DIRA, FW);
             dc_write(DC_CMD_DIRB, FW);
@@ -222,11 +302,11 @@ namespace MakeItRobotics
             dc_write(DC_CMD_PWMB, duty);
         }
 
-        internal void turn_front_right(Int16 speed)
+        internal void turn_front_right(Byte speed)
         {
             Debug.Print("Right turn: " + speed);
-            short duty = 0;
-            short half = 0;
+            Byte duty = 0;
+            Byte half = 0;
             if (speed == 0)
             {
                 duty = 0;
@@ -239,8 +319,8 @@ namespace MakeItRobotics
             }
             else
             {
-                duty = (short)(257 - speed);
-                half = (short)((short)(257 - speed) / 2);
+                duty = (Byte)(257 - speed);
+                half = (Byte)((Byte)(257 - speed) / 2);
             } dc_write(DC_CMD_DIRA, FW);
             dc_write(DC_CMD_DIRB, FW);
             dc_write(DC_CMD_PWMA, duty);
@@ -259,86 +339,86 @@ namespace MakeItRobotics
             return (nowTicks - startTicks) / 1000;
         }
 
-        internal void remote_scan(long nowTicks)
-        {
-            current_IR_time = micros(nowTicks);
-            diff_IR_time = current_IR_time - last_IR_time;
-            Debug.Print("Diff time: " + diff_IR_time);
-            last_IR_time = current_IR_time;
-            if (diff_IR_time> 1500)
-            {
-                irBits = 0;
-                irDataLow = 0;
-                irDataHigh = 0;
-            }
-            if (irBits < 24)
-            {
-                if (irBits % 2 > 0)
-                {
-                    if (diff_IR_time > IR_0_LOWER_LIMIT && diff_IR_time < IR_0_UPPER_LIMIT)
-                    {
-                        if (irBits < 12)
-                        {
-                            irDataLow <<= 1;
-                            irDataLow &= 0xFE;
-                        }
-                        else
-                        {
-                            irDataHigh <<= 1;
-                            irDataHigh &= 0xFE;
-                        }
-                    }
-                    else if (diff_IR_time > IR_1_LOWER_LIMIT && diff_IR_time < IR_1_UPPER_LIMIT)
-                    {
-                        if (irBits < 12)
-                        {
-                            irDataLow <<= 1;
-                            irDataLow |= 0x01;
-                        }
-                        else
-                        {
-                            irDataHigh <<= 1;
-                            irDataHigh |= 0x01;
-                        }
-                    }
-                }
-                irBits++;
-                if (irBits == 24)
-                {
-                    if (irDataLow == 50)  //--------->ONESµo¥Í
-                    {
-                        CirDataHigh = irDataHigh;
-                        CirDataLow = irDataLow;
-                        CirDataHigh = CirDataHigh * 256 + CirDataLow;
-                        repeatTimer1 = DateTime.Now.Ticks / 10000;
-                        irRxFlag = true;
-                    }
-                    else
-                    {
-                        if (even == 0)
-                        {
-                            OirDataLow = irDataLow;
-                            OirDataHigh = irDataHigh;
-                            irBits = 0;
-                            irDataLow = 0;
-                            irDataHigh = 0;
-                            even = 1;
-                        }
-                        else if (even == 1)
-                        {
-                            even = 0;
-                            if (OirDataLow == irDataLow && OirDataHigh == irDataHigh)//--------->CONTINUESµo¥Í
-                            {
-                                CirDataHigh = irDataHigh;
-                                CirDataLow = irDataLow;
-                                CirDataHigh = CirDataHigh * 256 + CirDataLow;
-                                repeatTimer1 = DateTime.Now.Ticks / 10000;
-                                irRxFlag = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        //internal void remote_scan(long nowTicks)
+        //{
+        //    current_IR_time = micros(nowTicks);
+        //    diff_IR_time = current_IR_time - last_IR_time;
+        //    Debug.Print("Diff time: " + diff_IR_time);
+        //    last_IR_time = current_IR_time;
+        //    if (diff_IR_time> 1500)
+        //    {
+        //        irBits = 0;
+        //        irDataLow = 0;
+        //        irDataHigh = 0;
+        //    }
+        //    if (irBits < 24)
+        //    {
+        //        if (irBits % 2 > 0)
+        //        {
+        //            if (diff_IR_time > IR_0_LOWER_LIMIT && diff_IR_time < IR_0_UPPER_LIMIT)
+        //            {
+        //                if (irBits < 12)
+        //                {
+        //                    irDataLow <<= 1;
+        //                    irDataLow &= 0xFE;
+        //                }
+        //                else
+        //                {
+        //                    irDataHigh <<= 1;
+        //                    irDataHigh &= 0xFE;
+        //                }
+        //            }
+        //            else if (diff_IR_time > IR_1_LOWER_LIMIT && diff_IR_time < IR_1_UPPER_LIMIT)
+        //            {
+        //                if (irBits < 12)
+        //                {
+        //                    irDataLow <<= 1;
+        //                    irDataLow |= 0x01;
+        //                }
+        //                else
+        //                {
+        //                    irDataHigh <<= 1;
+        //                    irDataHigh |= 0x01;
+        //                }
+        //            }
+        //        }
+        //        irBits++;
+        //        if (irBits == 24)
+        //        {
+        //            if (irDataLow == 50)  //--------->ONESµo¥Í
+        //            {
+        //                CirDataHigh = irDataHigh;
+        //                CirDataLow = irDataLow;
+        //                CirDataHigh = CirDataHigh * 256 + CirDataLow;
+        //                repeatTimer1 = DateTime.Now.Ticks / 10000;
+        //                irRxFlag = true;
+        //            }
+        //            else
+        //            {
+        //                if (even == 0)
+        //                {
+        //                    OirDataLow = irDataLow;
+        //                    OirDataHigh = irDataHigh;
+        //                    irBits = 0;
+        //                    irDataLow = 0;
+        //                    irDataHigh = 0;
+        //                    even = 1;
+        //                }
+        //                else if (even == 1)
+        //                {
+        //                    even = 0;
+        //                    if (OirDataLow == irDataLow && OirDataHigh == irDataHigh)//--------->CONTINUESµo¥Í
+        //                    {
+        //                        CirDataHigh = irDataHigh;
+        //                        CirDataLow = irDataLow;
+        //                        CirDataHigh = CirDataHigh * 256 + CirDataLow;
+        //                        repeatTimer1 = DateTime.Now.Ticks / 10000;
+        //                        irRxFlag = true;
+        //                    }
+        //                }
+        //            }
+        //        }
+        //    }
+        //}
     }
 }

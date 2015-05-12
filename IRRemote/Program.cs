@@ -17,7 +17,7 @@ namespace IRRemote
 
         public static void Main()
         {
-            remotePin = new InterruptPort((Cpu.Pin)FEZ_Pin.Interrupt.Di7, false, Port.ResistorMode.PullUp, Port.InterruptMode.InterruptEdgeHigh);
+            remotePin = new InterruptPort((Cpu.Pin)FEZ_Pin.Interrupt.Di7, false, Port.ResistorMode.PullUp, Port.InterruptMode.InterruptEdgeBoth);
             
             remotePin.OnInterrupt += interrupted;
 
@@ -33,7 +33,12 @@ namespace IRRemote
 
         private static void interrupted(uint data1, uint data2, DateTime time)
         {
-            if(count == 0)
+            if (microsecondsSinceLastEdge > 1500)
+            {
+                count = 0;
+            }
+            Debug.Print(count.ToString() + ": " + microsecondsSinceLastEdge + "(" + data1.ToString() + "/" + data2.ToString() + ")");
+            if (count == 0)
             {
                 count = 1;
                 lastTime = DateTime.Now.Ticks;
@@ -45,10 +50,7 @@ namespace IRRemote
             {
                 count++;
                 lastTime = time.Ticks;
-                return;
-            }
-
-            if (count > 0 && count <= 11)
+            } else if (count > 0 && count <= 11)
             {
                 microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
                 commandValueLow <<= 1;
