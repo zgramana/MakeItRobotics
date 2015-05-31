@@ -105,6 +105,7 @@ namespace MakeItRobotics
                 }
                 else                                          //if no buttons are pushed
                 {
+                    Debug.Print("!!! Receieved unknown command: " + valueo);
                     street_sweeper.move_stop();                 //stop wheels
                     if (sweep == true)                             //if sweeper plates are rotating
                         street_sweeper.street_sweeper_inward(80); //continue rotating sweeper plates inward      

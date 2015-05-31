@@ -178,16 +178,29 @@ namespace MakeItRobotics
                 else if (countEdgeHigh == 23)
                 {
                     edgeHighBuffer[countEdgeHigh] = time;
-                    edgeHighBuffer.CopyTo(HighEdges, 0);
-                    edgeLowBuffer.CopyTo(LowEdges, 0);
+                    
+                    lastTime = ((DateTime.Now.Ticks / 10000) - repeatTimer1);
+
+                    if (lastTime > 300)
+                    {
+                        lock (highEdgesBuffer)
+                        {
+                            edgeHighBuffer.CopyTo(HighEdges, 0);
+                            edgeLowBuffer.CopyTo(LowEdges, 0);
+                        }
+                        irRxFlag = true;
+                        repeatTimer1 = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                        waitHandle.Set();
+                        Debug.Print("Command completed. Cleared receive buffers");
+                    }
+                    else
+                    {
+                        Debug.Print("--> skipping since lastTime == " + lastTime);
+                    }
                     Array.Clear(edgeHighBuffer, 0, 24);
                     Array.Clear(edgeLowBuffer, 0, 24);
                     countEdgeLow = -1;
                     countEdgeHigh = -1;
-                    irRxFlag = true;
-                    repeatTimer1 = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-                    waitHandle.Set();
-                    Debug.Print("Command completed. Cleared receive buffers");
                 }
                 //microsecondsSinceLastHighEdge = (time.Ticks - lastEdgeLowTime) / 1000;
                 //lastEdgeHighTime = time.Ticks;
@@ -202,8 +215,11 @@ namespace MakeItRobotics
             commandValueHigh = 0;
             commandValueLow = 0;
 
-            Array.Copy(HighEdges, highEdgesBuffer, HighEdges.Length);
-            Array.Copy(LowEdges, lowEdgesBuffer, LowEdges.Length);
+            lock (highEdgesBuffer)
+            {
+                Array.Copy(HighEdges, highEdgesBuffer, HighEdges.Length);
+                Array.Copy(LowEdges, lowEdgesBuffer, LowEdges.Length);
+            }
 
             var vals = new int[24];
             var times = new int[24];
@@ -253,102 +269,103 @@ namespace MakeItRobotics
             }
 
             command = commandValueHigh * 256 + commandValueLow;
-            Debug.Print(count.ToString() + "Command Value: " + command.ToString());
+            
+            Debug.Print("Command Value: " + command.ToString());
         }
 
-        private void interrupted(uint data1, uint data2, DateTime time)
-        {
-            microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
-            if (data2 == 0)
-            {
-                countEdgeLow++;
-                microsecondsSinceLastLowEdge = (time.Ticks - lastEdgeLowTime) / 1000;
-                lastEdgeLowTime = time.Ticks;
-            }
-            else
-            {
-                countEdgeHigh++;
-                microsecondsSinceLastHighEdge = (time.Ticks - lastEdgeLowTime) / 1000;
-                lastEdgeHighTime = time.Ticks;
-            }
+        //private void interrupted(uint data1, uint data2, DateTime time)
+        //{
+        //    microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
+        //    if (data2 == 0)
+        //    {
+        //        countEdgeLow++;
+        //        microsecondsSinceLastLowEdge = (time.Ticks - lastEdgeLowTime) / 1000;
+        //        lastEdgeLowTime = time.Ticks;
+        //    }
+        //    else
+        //    {
+        //        countEdgeHigh++;
+        //        microsecondsSinceLastHighEdge = (time.Ticks - lastEdgeLowTime) / 1000;
+        //        lastEdgeHighTime = time.Ticks;
+        //    }
 
-            if (microsecondsSinceLastEdge > 1500)
-            {
-                count = 0;
-                countEdgeHigh = 0;
-                countEdgeLow = 0;
-            }
-            Debug.Print(count.ToString() + ": " + microsecondsSinceLastEdge + "(" + data1.ToString() + "/" + data2.ToString() + ") [" + microsecondsSinceLastLowEdge.ToString() + "/" + microsecondsSinceLastHighEdge + "] <" + countEdgeLow + "/" +countEdgeHigh + ">");
-            if (count == 0)
-            {
-                count = 1;
-                lastTime = time.Ticks; //DateTime.Now.Ticks;                
-                commandValueLow = 0;
-                commandValueHigh = 0;
+        //    if (microsecondsSinceLastEdge > 1500)
+        //    {
+        //        count = 0;
+        //        countEdgeHigh = 0;
+        //        countEdgeLow = 0;
+        //    }
+        //    Debug.Print(count.ToString() + ": " + microsecondsSinceLastEdge + "(" + data1.ToString() + "/" + data2.ToString() + ") [" + microsecondsSinceLastLowEdge.ToString() + "/" + microsecondsSinceLastHighEdge + "] <" + countEdgeLow + "/" +countEdgeHigh + ">");
+        //    if (count == 0)
+        //    {
+        //        count = 1;
+        //        lastTime = time.Ticks; //DateTime.Now.Ticks;                
+        //        commandValueLow = 0;
+        //        commandValueHigh = 0;
 
-                countEdgeHigh = 0;
-                countEdgeLow = 1;
-                microsecondsSinceLastEdge = 0;
-                microsecondsSinceLastHighEdge = 0;
-                microsecondsSinceLastLowEdge = 0;
-            }
-            else if (count >= 24)
-            {
-                count++;
-                lastTime = time.Ticks;
-                return;
-            }
-            else if (count < 24 && count % 2 == 0)
-            {
-                count++;
-                lastTime = time.Ticks;
-            }
-            else if (count > 0 && count <= 11)
-            {
-                microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
-                commandValueLow <<= 1;
-                if (microsecondsSinceLastEdge <= 8)
-                {
-                    commandValueLow &= 0xFE;
-                }
-                else
-                {
-                    commandValueLow |= 1;
-                }
-                count++;
-            }
-            else if (count > 11 && count <= 23)
-            {
-                microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
-                commandValueHigh <<= 1;
-                if (microsecondsSinceLastEdge <= 8)
-                {
-                    commandValueHigh &= 0xFE;
-                }
-                else
-                {
-                    commandValueHigh |= 1;
-                }
-                count++;
-            }
-            else
-            {
-                count++;
-            }
+        //        countEdgeHigh = 0;
+        //        countEdgeLow = 1;
+        //        microsecondsSinceLastEdge = 0;
+        //        microsecondsSinceLastHighEdge = 0;
+        //        microsecondsSinceLastLowEdge = 0;
+        //    }
+        //    else if (count >= 24)
+        //    {
+        //        count++;
+        //        lastTime = time.Ticks;
+        //        return;
+        //    }
+        //    else if (count < 24 && count % 2 == 0)
+        //    {
+        //        count++;
+        //        lastTime = time.Ticks;
+        //    }
+        //    else if (count > 0 && count <= 11)
+        //    {
+        //        microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
+        //        commandValueLow <<= 1;
+        //        if (microsecondsSinceLastEdge <= 8)
+        //        {
+        //            commandValueLow &= 0xFE;
+        //        }
+        //        else
+        //        {
+        //            commandValueLow |= 1;
+        //        }
+        //        count++;
+        //    }
+        //    else if (count > 11 && count <= 23)
+        //    {
+        //        microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
+        //        commandValueHigh <<= 1;
+        //        if (microsecondsSinceLastEdge <= 8)
+        //        {
+        //            commandValueHigh &= 0xFE;
+        //        }
+        //        else
+        //        {
+        //            commandValueHigh |= 1;
+        //        }
+        //        count++;
+        //    }
+        //    else
+        //    {
+        //        count++;
+        //    }
 
-            if (count == 24)
-            {
-                commandValue = commandValueHigh * 256 + commandValueLow;
-                Debug.Print(count.ToString() + "Command Value: " + commandValue.ToString());
-                irRxFlag = true;
-                repeatTimer1 = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-                return;
-            }
-            else
-            {
-                lastTime = time.Ticks;
-            }
-        }
+        //    if (count == 24)
+        //    {
+        //        commandValue = commandValueHigh * 256 + commandValueLow;
+        //        Debug.Print(count.ToString() + "Command Value: " + commandValue.ToString());
+        //        irRxFlag = true;
+        //        repeatTimer1 = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+        //        return;
+        //    }
+        //    else
+        //    {
+        //        lastTime = time.Ticks;
+        //    }
+        //}
 
         internal void all_stop()
         {
@@ -404,8 +421,8 @@ namespace MakeItRobotics
 
                     // TODO: copy the edge buffers and pass byref.
 
-                    process_command_buffer(ref commandValue);
                     Debug.Print("irRxFlag = false");
+                    process_command_buffer(ref commandValue);
                     waitHandle.Reset();
                 }
                 //Debug.Print("repeating command = " + commandValue);
