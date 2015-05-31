@@ -54,8 +54,8 @@ namespace MakeItRobotics
         internal static void Run()
         {
             valuen = street_sweeper.remote_value_read();  //read code from remote control
-            if (valuen != 0)
-                Debug.Print(valuen.ToString());
+            //if (valuen != 0)
+            //    Debug.Print(valuen.ToString());
             if (valuen != valueo)  //if the remote control code is different than the previous code, then change status
             {
                 valueo = valuen;  //refresh the previous code

@@ -40,6 +40,27 @@ namespace MakeItRobotics
         private static int commandValueLow;
         private static long microsecondsSinceLastEdge;
 
+        private static long microsecondsSinceLastHighEdge;
+        private static long microsecondsSinceLastLowEdge;
+
+        private static long countEdgeLow;
+        private static long countEdgeHigh;
+
+        private static long lastEdgeLowTime;
+        private static long lastEdgeHighTime;
+
+        private static DateTime[] edgeLowBuffer;
+        private static DateTime[] edgeHighBuffer;
+
+        private static DateTime[] LowEdges;
+        private static DateTime[] HighEdges;
+
+        private static DateTime[] highEdgesBuffer;
+        private static DateTime[] lowEdgesBuffer;
+        private static DateTime lowEdge;
+        private static DateTime highEdge;
+
+        private static ManualResetEvent waitHandle;
 
         byte irDataHigh;
         byte irDataLow;
@@ -55,7 +76,7 @@ namespace MakeItRobotics
         byte even=0;
         long repeatTimer1;
         long repeatTimer2;
-        long startTicks;
+        private static long startTicks;
 
         //byte incomingByte = 0;
         //int incomingCnt = 0;
@@ -67,11 +88,25 @@ namespace MakeItRobotics
 
         #endregion
 
-        private SerialPort serial;
+        private static SerialPort serial;
         private static int commandValue;
 
-        public StreetSweeper()
+        static StreetSweeper()
         {
+            countEdgeLow = -1;
+            countEdgeHigh = -1;
+
+            edgeLowBuffer = new DateTime[24];
+            edgeHighBuffer = new DateTime[24];
+
+            LowEdges = new DateTime[24];
+            HighEdges = new DateTime[24];
+            lowEdgesBuffer = new DateTime[24];
+            highEdgesBuffer = new DateTime[24];
+
+            waitHandle = new ManualResetEvent(false);
+
+
             serial = new SerialPort("COM1", 10420);
             serial.ReadTimeout = 0;
             serial.ErrorReceived += serial_ErrorReceived;
@@ -79,7 +114,7 @@ namespace MakeItRobotics
             startTicks = DateTime.Now.Ticks;
         }
 
-        private void serial_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
+        private static void serial_ErrorReceived(object sender, SerialErrorReceivedEventArgs e)
         {
             Debug.Print("Serial Error: " + e.ToString());
         }
@@ -88,7 +123,7 @@ namespace MakeItRobotics
         {
             //remotePin = new InputPort((Cpu.Pin)FEZ_Pin.Digital.Di10, false, Port.ResistorMode.PullUp);
             //remotePin.EnableInterrupt();
-            remotePin.OnInterrupt += interrupted;
+            remotePin.OnInterrupt += remotePin_OnInterrupt; //interrupted;
 
             //pinMode(10, INPUT);
             //digitalWrite(10, HIGH);
@@ -97,26 +132,165 @@ namespace MakeItRobotics
             //MCUCR = (1 << ISC01) | (1 << ISC00);
         }
 
-        //void remotePin_OnInterrupt(uint data1, uint data2, DateTime time)
-        //{
-        //    //Debug.Print("IR event: " + micros(time.Ticks));
-        //    remote_scan(time.Ticks);  //analyze signal from RadioShack Make: it Robotics Remote Control
-        //}
+        void remotePin_OnInterrupt(uint data1, uint data2, DateTime time)
+        {
+            if (data2 == 0)
+            {
+                microsecondsSinceLastLowEdge = (time.Ticks - edgeLowBuffer[0].Ticks) / 1000;
+                if (edgeLowBuffer[0] != DateTime.MinValue && microsecondsSinceLastLowEdge > 4000)
+                {
+                    Array.Clear(edgeLowBuffer, 0, 24);
+                    Array.Clear(edgeHighBuffer, 0, 24);
+                    Debug.Print("Incomplete command after 4ms. Delay: " + microsecondsSinceLastLowEdge + ", countEdgeLow: " + countEdgeLow);
+                    countEdgeLow = -1;
+                    countEdgeHigh = -1;
+                }
+
+                countEdgeLow++;
+
+                if (countEdgeLow < 24)
+                {
+                    edgeLowBuffer[countEdgeLow] = time;
+                }
+                //countEdgeLow++;
+                //microsecondsSinceLastLowEdge = (time.Ticks - lastEdgeLowTime) / 1000;
+                //lastEdgeLowTime = time.Ticks;
+            }
+            else
+            {
+                microsecondsSinceLastLowEdge = (time.Ticks - edgeLowBuffer[0].Ticks) / 1000;
+                if (edgeLowBuffer[0] != DateTime.MinValue && microsecondsSinceLastLowEdge > 4000)
+                {
+                    //Array.Clear(edgeLowBuffer, 0, 24);
+                    Array.Clear(edgeHighBuffer, 0, 24);
+                    //countEdgeLow = -1;
+                    Debug.Print("Incomplete command after 4ms. Delay: " + microsecondsSinceLastLowEdge + ", countEdgeHigh: " + countEdgeHigh);
+                    countEdgeHigh = -1;
+                    return;
+                }
+
+                countEdgeHigh++;
+
+                if (countEdgeHigh < 23)
+                {
+                    edgeHighBuffer[countEdgeHigh] = time;
+                }
+                else if (countEdgeHigh == 23)
+                {
+                    edgeHighBuffer[countEdgeHigh] = time;
+                    edgeHighBuffer.CopyTo(HighEdges, 0);
+                    edgeLowBuffer.CopyTo(LowEdges, 0);
+                    Array.Clear(edgeHighBuffer, 0, 24);
+                    Array.Clear(edgeLowBuffer, 0, 24);
+                    countEdgeLow = -1;
+                    countEdgeHigh = -1;
+                    irRxFlag = true;
+                    repeatTimer1 = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                    waitHandle.Set();
+                    Debug.Print("Command completed. Cleared receive buffers");
+                }
+                //microsecondsSinceLastHighEdge = (time.Ticks - lastEdgeLowTime) / 1000;
+                //lastEdgeHighTime = time.Ticks;
+            }
+
+            //Debug.Print("(" + data1.ToString() + "/" + data2.ToString() + ") <" + countEdgeLow + "/" + countEdgeHigh + ">");
+        }
+
+        private void process_command_buffer(ref int command)
+        {
+            command = 0;
+            commandValueHigh = 0;
+            commandValueLow = 0;
+
+            Array.Copy(HighEdges, highEdgesBuffer, HighEdges.Length);
+            Array.Copy(LowEdges, lowEdgesBuffer, LowEdges.Length);
+
+            var vals = new int[24];
+            var times = new int[24];
+
+            for (count = 0; count < 24; count++)
+            {
+                lowEdge = lowEdgesBuffer[count];
+                highEdge = highEdgesBuffer[count];
+
+                if (lowEdge == default(DateTime) || highEdge == default(DateTime))
+                {
+                    // We found an incomplete command buffer.
+                    return;
+                }
+
+                times[count] = (int)(highEdge.Ticks - lowEdge.Ticks) / 1000;
+
+                if (count >= 0 && count <= 5)
+                {
+                    commandValueLow <<= 1;
+
+                    if ((highEdge.Ticks - lowEdge.Ticks) / 1000 <= 8)
+                    {
+                        vals[count] = 0;
+                        commandValueLow &= 0xFE;
+                    }
+                    else
+                    {
+                        vals[count] = 1;
+                        commandValueLow |= 1;
+                    }
+                }
+                else if (count > 5 && count <= 11)
+                {
+                    commandValueHigh <<= 1;
+                    if ((highEdge.Ticks - lowEdge.Ticks) / 1000 <= 8)
+                    {
+                        vals[count] = 0;
+                        commandValueHigh &= 0xFE;
+                    }
+                    else
+                    {
+                        vals[count] = 1;
+                        commandValueHigh |= 1;
+                    }
+                }
+            }
+
+            command = commandValueHigh * 256 + commandValueLow;
+            Debug.Print(count.ToString() + "Command Value: " + command.ToString());
+        }
+
         private void interrupted(uint data1, uint data2, DateTime time)
         {
             microsecondsSinceLastEdge = (time.Ticks - lastTime) / 1000;
+            if (data2 == 0)
+            {
+                countEdgeLow++;
+                microsecondsSinceLastLowEdge = (time.Ticks - lastEdgeLowTime) / 1000;
+                lastEdgeLowTime = time.Ticks;
+            }
+            else
+            {
+                countEdgeHigh++;
+                microsecondsSinceLastHighEdge = (time.Ticks - lastEdgeLowTime) / 1000;
+                lastEdgeHighTime = time.Ticks;
+            }
+
             if (microsecondsSinceLastEdge > 1500)
             {
                 count = 0;
+                countEdgeHigh = 0;
+                countEdgeLow = 0;
             }
-            Debug.Print(count.ToString() + ": " + microsecondsSinceLastEdge + "(" + data1.ToString() + "/" + data2.ToString() + ")");
+            Debug.Print(count.ToString() + ": " + microsecondsSinceLastEdge + "(" + data1.ToString() + "/" + data2.ToString() + ") [" + microsecondsSinceLastLowEdge.ToString() + "/" + microsecondsSinceLastHighEdge + "] <" + countEdgeLow + "/" +countEdgeHigh + ">");
             if (count == 0)
             {
                 count = 1;
-                lastTime = time.Ticks; //DateTime.Now.Ticks;
+                lastTime = time.Ticks; //DateTime.Now.Ticks;                
                 commandValueLow = 0;
                 commandValueHigh = 0;
+
+                countEdgeHigh = 0;
+                countEdgeLow = 1;
                 microsecondsSinceLastEdge = 0;
+                microsecondsSinceLastHighEdge = 0;
+                microsecondsSinceLastLowEdge = 0;
             }
             else if (count >= 24)
             {
@@ -227,11 +401,19 @@ namespace MakeItRobotics
                 if (irRxFlag == true)
                 {
                     irRxFlag = false;
+
+                    // TODO: copy the edge buffers and pass byref.
+
+                    process_command_buffer(ref commandValue);
+                    Debug.Print("irRxFlag = false");
+                    waitHandle.Reset();
                 }
+                //Debug.Print("repeating command = " + commandValue);
             }
             else
             {
                 commandValue = 0;
+                waitHandle.WaitOne(); // wait for a new command to arrive.
             }
             return commandValue;
         }
@@ -240,7 +422,7 @@ namespace MakeItRobotics
         {
             Debug.Print("Sweeping inward: " + speed);
             m3_action(BW, speed);
-          m4_action(BW,speed);  
+            m4_action(BW,speed);  
         }
 
         internal void street_sweeper_outward(Byte speed)
