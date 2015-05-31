@@ -188,10 +188,6 @@ namespace MakeItRobotics
                             edgeHighBuffer.CopyTo(HighEdges, 0);
                             edgeLowBuffer.CopyTo(LowEdges, 0);
                         }
-                        irRxFlag = true;
-                        repeatTimer1 = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-                        waitHandle.Set();
-                        Debug.Print("Command completed. Cleared receive buffers");
                     }
                     else
                     {
@@ -201,6 +197,13 @@ namespace MakeItRobotics
                     Array.Clear(edgeLowBuffer, 0, 24);
                     countEdgeLow = -1;
                     countEdgeHigh = -1;
+                    if (lastTime > 300)
+                    {
+                        irRxFlag = true;
+                        repeatTimer1 = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                        waitHandle.Set();
+                        Debug.Print("Command completed. Cleared receive buffers");
+                    }
                 }
                 //microsecondsSinceLastHighEdge = (time.Ticks - lastEdgeLowTime) / 1000;
                 //lastEdgeHighTime = time.Ticks;
@@ -413,7 +416,7 @@ namespace MakeItRobotics
         {
             //return commandValue;
             repeatTimer2 = DateTime.Now.Ticks / 10000;
-            if ((repeatTimer2 - repeatTimer1) < 300)
+            if (repeatTimer2 - repeatTimer1 < 300)
             {
                 if (irRxFlag == true)
                 {
@@ -421,14 +424,13 @@ namespace MakeItRobotics
 
                     // TODO: copy the edge buffers and pass byref.
 
-                    Debug.Print("irRxFlag = false");
+                    Debug.Print(">>> starting new command");
                     process_command_buffer(ref commandValue);
                     waitHandle.Reset();
                 }
-                //Debug.Print("repeating command = " + commandValue);
             }
             else
-            {
+            {                
                 commandValue = 0;
                 waitHandle.WaitOne(); // wait for a new command to arrive.
             }
@@ -493,7 +495,7 @@ namespace MakeItRobotics
             else
             {
                 duty = (Byte)(257 - speed);
-                half = (Byte)((Byte)(257 - speed) / 2);
+                half = (Byte)(257 - speed * 3 / 4);
             }
             dc_write(DC_CMD_DIRA, FW);
             dc_write(DC_CMD_DIRB, FW);
@@ -519,8 +521,9 @@ namespace MakeItRobotics
             else
             {
                 duty = (Byte)(257 - speed);
-                half = (Byte)((Byte)(257 - speed) / 2);
-            } dc_write(DC_CMD_DIRA, FW);
+                half = (Byte)(257 - speed * 0.6);
+            } 
+            dc_write(DC_CMD_DIRA, FW);
             dc_write(DC_CMD_DIRB, FW);
             dc_write(DC_CMD_PWMA, duty);
             dc_write(DC_CMD_PWMB, half);
